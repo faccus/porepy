@@ -14,7 +14,9 @@ import porepy as pp
 import os
 import scipy.optimize as opt
 import sympy as sym
-import scipy as sps
+import scipy.sparse.linalg as spsla
+import math
+
 
 from typing import Optional, Union
 from dataclasses import dataclass
@@ -206,12 +208,12 @@ class BEM:
         self.params = params
 
     def get_crack_center(self) -> np.ndarray:
-        """Computes the global coordinates of the crack center.
+        """Get global coordinates of the crack center.
 
         We assume that the crack center coincides with the center of the domain.
 
         Returns:
-            - Global coordinates of the crack center. Shape is (3, ).
+            ndarray of ``shape (3, )`` with the global coordinates of the crack center.
 
         """
         lx, ly = self.params["domain_size"]  # [m]
@@ -243,7 +245,8 @@ class BEM:
                 BEM segments given in ``self.params["num_bem_segments"]`` will be used.
 
         Returns:
-            - Global coordinates of the BEM centers. Shape is (3, num_segments).
+            ndarray of ``shape=(3, num_segments)`` with the global coordinates of the
+            BEM centers.
 
         """
         if num_bem_segments is None:
@@ -268,17 +271,17 @@ class BEM:
     def get_distance_from_crack_center(self, points: np.ndarray) -> np.ndarray:
         """Compute distance from a set of points to the fracture center.
 
-        Args:
-            points: coordinates of the set of points. Shape is (3, num_points).
+        Parameters:
+            points (shape=(3, num_points)): global coordinates of the set of points.
 
         Returns:
-            Distance from the set of point to the fracture center. Shape is
-                (num_points, ).
+            ndarray of ``shape=(num_points, )`` containing the distance from the set of
+            points to the crack center.
 
         """
         crack_center = self.get_crack_center()
 
-        return pp.distances.point_pointset(crack_center, points)
+        return pp.distances.point_pointset(points, crack_center)
 
     def transform_coordinates(
         self,
@@ -288,14 +291,13 @@ class BEM:
         """Transform from global to local coordinates (relative to the BEM segment).
 
         Parameters:
-            bem_center: global coordinates of the BEM segment center.
-                Shape is (3, ).
-            points_in_global_coo: global coordinates of the points.
-                Shape is (3, num_points).
+            bem_center (shape=(3, )): global coordinates of the BEM segment center.
+            points_in_global_coo (shape=(3, num_points)): global coordinates of the
+                set of points.
 
         Returns:
-            - Transformed coordinates for the given set of ``points`` .
-             Shape is (3, num_points).
+            ndarray of ``shape=(3, num_points)`` containing the local coordinates
+            for the given set of points.
 
         """
         beta = self.params["crack_angle"]  # [radians]
@@ -333,14 +335,16 @@ class BEM:
                 (in meters) that the BEM segment undergoes. In our setting, this will
                 typically correspond to the exact normal relative displacement obtained
                 via Sneddon's solution [1].
-            points_in_local_coo: points given in local coordinates (relative to the bem
-                segment) at which the displacement solution will be evaluated.
-            num_bem_segments: Number of BEM segments. If not specified, we use the
-                number of elements given in ``self.params["num_bem_segments"]``.
+            points_in_local_coo (shape=(3, num_points)): points given in local
+                coordinates (relative to the BEM segment) at which the displacement
+                solution will be evaluated.
+            num_bem_segments: Number of BEM segments. If not specified, the number of
+                BEM segments given in ``self.params["num_bem_segments"]`` will be used.
 
         Returns:
-            Array of ``shape=(2 * num_points, )``. BEM contribution to the displacement
-            at the given `points`. The array is returned in flattened vector format.
+            Array of ``shape=(2 * num_points, )`` containing the BEM contribution to
+            the displacement at the given points. Note that the array is returned as
+            a flattened vector.
 
         Notes:
             The expressions are given for `u_x` and `u_y` for an arbitrarily oriented
@@ -386,8 +390,8 @@ class BEM:
         beta = self.params["crack_angle"]  # [radians]
         nu = self.params["poisson_coefficient"]  # [-]
         dl = self.get_bem_length(num_bem_segments=n)  # [m]
-        a = dl / 2  # half-length of the bem segment
-        coo = points_in_local_coo[0]
+        a = dl/2  # half-length of the bem segment
+        coo = points_in_local_coo
 
         # Constant term that multiplies the expressions
         c0 = 1 / (4 * np.pi * (1 - nu))
@@ -401,9 +405,11 @@ class BEM:
         )
 
         # F3(x_bar, y_bar) = f_{y_bar}
+        # Note that we have to use arctan2 and not arctan for computing F3(x_bar, y_bar)
+        # Not entirely why, but if arctan is employed, you'll get wrong results
         F3_bar = -c0 * (
-            np.arctan(coo[1] / (coo[0] - a))
-            - np.arctan(coo[1] / (coo[0] + a))
+            np.arctan2(coo[1],  (coo[0] - a))
+            - np.arctan2(coo[1], (coo[0] + a))
         )
 
         # F4(x_bar, y_bar) = f_{x_bar, y_bar}
@@ -425,13 +431,14 @@ class BEM:
                 - coo[1] * (np.cos(beta) * F4_bar + np.sin(beta) * F5_bar)
         )
 
+        # Displacement in the global y-coordinate
         u_y = D_n * (
                 -(1 - 2 * nu) * np.sin(beta) * F2_bar
                 + 2 * (1 - nu) * np.cos(beta) * F3_bar
                 - coo[1] * (np.sin(beta) * F4_bar - np.cos(beta) * F5_bar)
         )
 
-        u = np.array([u_x, u_y]).ravel("F")
+        u = np.ravel(np.array([u_x, u_y]), "F")
 
         return u
 
@@ -440,13 +447,13 @@ class BEM:
         points_in_global_coo: np.ndarray,
         num_bem_segments: int | None = None,
     ) -> np.ndarray:
-        """Compute (outside of crack) displacements at the given points using BEM.
+        """Compute displacements (outside of crack) at the given points using BEM.
 
         Parameters:
             points_in_global_coo (shape=(3, num_points )): Global coordinates of the
-                points at which the displacement will be computed.
-            num_bem_segments: Number of BEM segments. If not specified, we use the
-                number of elements given in ``self.params["num_bem_segments"]``.
+                points at which displacements will be computed.
+            num_bem_segments: Number of BEM segments. If not specified, the number of
+                BEM segments given in ``self.params["num_bem_segments"]`` will be used.
 
         Returns:
             ndarray (shape=(2 * num_points, )). Computed displacement at the given
@@ -475,8 +482,8 @@ class BEM:
 
             # Transform coordinates relative to each bem center
             points_in_local_coo = self.transform_coordinates(
-                bem_centers[:, bem],
-                points_in_global_coo
+                bem_center=bem_centers[:, bem],
+                points_in_global_coo=points_in_global_coo
             )
 
             # Get bem contribution to the displacement at the given set of points
@@ -492,7 +499,7 @@ class BEM:
         return u
 
     def exact_relative_normal_displacement(self, eta: np.ndarray) -> np.ndarray:
-        """Compute exact relative normal displacement.
+        """Compute exact relative normal displacement [1].
 
         Parameters:
             eta (shape=(num_points, )): array containing the distances from a set of
@@ -502,7 +509,11 @@ class BEM:
             Array of ``shape=(num_points, )`` containing the exact relative normal
             displacement for each ``eta``.
 
-        """
+        References:
+            [1] Sneddon, I.N.: Fourier Transforms. McGraw Hill Book Co, Inc.,
+              New York (1951).
+
+       """
         nu_s = self.params["poisson_coefficient"]  # [-]
         mu_s = self.params["mu_lame"]  # [Pa]
         p0 = self.params["crack_pressure"]  # [Pa]
@@ -510,7 +521,7 @@ class BEM:
         a = frac_length / 2
 
         c0 = (1 - nu_s) / mu_s * p0 * frac_length
-        u_n = c0 * np.sqrt(1 - (eta / a) ** 2)
+        u_n = c0 * np.sqrt(1 - np.power(eta / a, 2))
 
         return u_n
 
@@ -530,7 +541,9 @@ class BEM:
             problem using the Boundary Element Method. Shape is (num_bem_segments, ).
 
         References:
-
+            [1] Crouch, S.L., Starfield, A.: Boundary Element Methods in Solid
+              Mechanics: With Applications in Rock Mechanics and Geological
+              Engineering. Allen & Unwin, London (1982).
 
         """
         if num_bem_segments is None:
@@ -542,12 +555,13 @@ class BEM:
         mu_s = self.params["mu_lame"]  # [Pa]
         nu_s = self.params["poisson_coefficient"]  # [-]
         dl = self.get_bem_length(n)  # [m]
-        c = self.get_bem_centers(n)
+        c = self.get_bem_centers(n)  # [m]
 
         # Transform coordinates
+        # FIXME: Do we need to transform the coordinates?
         # c_bar = self.coordinate_transform(c)
 
-        # Compute matrix of influence coefficients
+        # Compute matrix of influence coefficients A_{i,j}
         a0 = -mu_s / (np.pi * (1 - nu_s))
         A = np.zeros((n, n))
         for i in range(n):
@@ -558,7 +572,7 @@ class BEM:
         b = p * np.ones(n)
 
         # Solve linear system
-        x = sps.linalg.solve(A, b)
+        x = spsla.spsolve(A, b)
 
         return x
 
@@ -591,7 +605,7 @@ class SneddonSetup(pp.ContactMechanics):
             ("mesh_size", 2.0),  # [m]
             ("mu_lame", 1.0),  # [GPa]
             ("num_bem_segments", 1000),
-            ("plot_results", False),
+            ("plot_results", True),
             ("use_ad", True),  # only `use_ad = True` is supported
         ]
 
@@ -627,7 +641,7 @@ class SneddonSetup(pp.ContactMechanics):
         h = self.params["mesh_size"]  # [m]
         beta = self.params["crack_angle"]  # [radians]
         crack_length = self.params["crack_length"]  # [m]
-        a = crack_length / 2
+        a = crack_length / 2  # [m]
 
         # Create bounding box
         self.box = {"xmin": 0.0, "xmax": lx, "ymin": 0.0, "ymax": ly}
@@ -637,8 +651,10 @@ class SneddonSetup(pp.ContactMechanics):
         x_1 = (lx / 2) + a * np.cos(beta)  # final tip coo in x
         y_0 = (ly / 2) - a * np.sin(beta)  # initial tip coo in y
         y_1 = (ly / 2) + a * np.sin(beta)  # final tip coo in y
-        frac_pts = np.array([[x_0, y_0], [x_1, y_1]]).T
-        frac_edges = np.array([[0, 1]]).T
+        frac_pts = np.array([[x_0, x_1],
+                             [y_0, y_1]])
+        frac_edges = np.array([[0],
+                               [1]])
         network_2d = pp.FractureNetwork2d(frac_pts, frac_edges, self.box)
 
         # Create mixed-dimensional grid
@@ -647,6 +663,57 @@ class SneddonSetup(pp.ContactMechanics):
 
         # Set projections
         pp.contact_conditions.set_projections(self.mdg)
+
+    def _initial_condition(self):
+        super()._initial_condition()
+
+        for sd, data in self.mdg.subdomains(return_data=True):
+            if sd.dim == 1:
+                p0 = self.params["crack_pressure"] * sd.cell_volumes
+                initial_tangential_force = np.zeros(sd.num_cells)
+                initial_normal_force = p0
+                initial_traction = np.array(
+                    [initial_tangential_force, initial_normal_force]
+                ).ravel("F")
+                data[pp.STATE][self.contact_traction_variable] = initial_traction
+                data[pp.STATE][pp.ITERATE][self.contact_traction_variable] = initial_traction
+
+    def _friction_coefficient(self, sd: pp.Grid) -> np.ndarray:
+        """Set friction coefficient."""
+        return 0.5 * np.ones(sd.num_cells)
+
+    def _bc_type(self, sd: pp.Grid) -> pp.BoundaryConditionVectorial:
+        super()._bc_type(sd)
+        if sd.dim == 2:
+            faces = sd.get_all_boundary_faces()
+            return pp.BoundaryConditionVectorial(sd, faces, "dir")
+    def _bc_values(self, sd: pp.Grid) -> np.ndarray:
+        """Set boundary condition values"""
+        super()._bc_values(sd)
+        if sd.dim == 2:
+            return setup.get_boundary_conditions()
+        # if sd.dim == 2:
+        #     return get_bc_values_michele(
+        #         sd_rock=sd,
+        #         G=self.params["mu_lame"],
+        #         poi=self.params["poisson_coefficient"],
+        #         p0=self.params["crack_pressure"],
+        #         a=self.params["crack_length"]/2,
+        #         n=self.params["num_bem_segments"],
+        #         domain_size=self.params["domain_size"],
+        #         theta=math.radians(90-self.params["crack_angle"])
+        #     )
+
+    def _stiffness_tensor(self, sd: pp.Grid) -> pp.FourthOrderTensor:
+        """Set stiffness tensor"""
+        mu_s = self.params["mu_lame"]  # [Pa]
+        nu_s = self.params["poisson_coefficient"]  # [-]
+        lmbda_s = (2 * mu_s * nu_s) / (1 - 2 * nu_s)  # [Pa]
+
+        lam = lmbda_s * np.ones(sd.num_cells)
+        mu = mu_s * np.ones(sd.num_cells)
+
+        return pp.FourthOrderTensor(mu, lam)
 
     def after_simulation(self) -> None:
         """Method to be called once the simulation has finished."""
@@ -659,7 +726,8 @@ class SneddonSetup(pp.ContactMechanics):
 
         sd_rock = self.mdg.subdomains()[0]
         sides = self._domain_boundary_sides(sd_rock)
-        bc_faces = sides.all_bf
+        # bc_faces = sides.all_bf
+        bc_faces = sd_rock.get_boundary_faces()
         bc_coo = sd_rock.face_centers[:, bc_faces]
 
         u_bc = self.bem.compute_displacement(bc_coo)
@@ -760,25 +828,25 @@ class SneddonSetup(pp.ContactMechanics):
             linewidth=0,
             color="orange",
         )
-        plt.step(
-            bem_centers[0] / crack_length,
-            bem_sol / crack_length,
-            where="mid",
-            color="orange",
-        )
-        plt.step(
-            np.array([2.0, bem_centers[0][0] / crack_length]),
-            np.array([0, bem_sol[0] / crack_length]),
-            where="pre",
-            color="orange",
-        )
-        plt.step(
-            np.array([bem_centers[0][-1] / crack_length, 3.0]),
-            np.array([bem_sol[-1] / crack_length, 0]),
-            where="post",
-            color="orange",
-            alpha=0.7,
-        )
+        # plt.step(
+        #     bem_centers[0] / crack_length,
+        #     bem_sol / crack_length,
+        #     where="mid",
+        #     color="orange",
+        # )
+        # plt.step(
+        #     np.array([2.0, bem_centers[0][0] / crack_length]),
+        #     np.array([0, bem_sol[0] / crack_length]),
+        #     where="pre",
+        #     color="orange",
+        # )
+        # plt.step(
+        #     np.array([bem_centers[0][-1] / crack_length, 3.0]),
+        #     np.array([bem_sol[-1] / crack_length, 0]),
+        #     where="post",
+        #     color="orange",
+        #     alpha=0.7,
+        # )
 
         # Label plot
         plt.plot(
@@ -808,31 +876,63 @@ class SneddonSetup(pp.ContactMechanics):
 
         if not os.path.exists("out"):
             os.makedirs("out")
-        plt.savefig("out" + "sneddon" + ".pdf", bbox_inches="tight")
+        plt.savefig("out/" + "sneddon" + ".pdf", bbox_inches="tight")
         plt.gcf().clear()
 
 
 #%% Runner
 params = {
-    "frac_angle": 0,
+    "crack_angle": 0,
     "plot_results": False,
     "num_bem_segments": 1000,
     "domain_size": (50, 50),
     "mesh_size": 5.0,
 }
 setup = SneddonSetup(params=params)
-pp.run_stationary_model(setup, params)
+setup.prepare_simulation()
 
 mdg = setup.mdg
+
 sd_rock = mdg.subdomains()[0]
 sd_frac = mdg.subdomains()[1]
+intf = mdg.interfaces()[0]
 
-u_bem = setup.bem.compute_displacement(sd_rock.cell_centers)
+data_rock = setup.mdg.subdomain_data(sd_rock)
+data_frac = setup.mdg.subdomain_data(sd_frac)
+data_intf = setup.mdg.interface_data(intf)
 
-#pp.plot_grid(sd_rock, u_bem[::2], plot_2d=True, title="u_bem_x", linewidth=0)
-#pp.plot_grid(sd_rock, u_bem[1::2], plot_2d=True, title="u_bem_y", linewidth=0)
+#%% Extract subsystem
+eq_reduced = setup._eq_manager.subsystem_equation_manager(
+    eq_names=["momentum", "force_balance"],
+    variables=[setup._ad.displacement, setup._ad.interface_displacement]
+)
+A_reduced, b_reduced = eq_reduced.assemble()
 
-#%%
+x = spsla.spsolve(A_reduced, b_reduced)
+u_rock = x[: 2 * sd_rock.num_cells]
+u_intf = x[2*sd_rock.num_cells :]
+
+u_intf_t = u_intf[::2]
+u_intf_n = u_intf[1::2]
+
+jump_u = (
+            intf.mortar_to_secondary_avg(nd=2)
+            * intf.sign_of_mortar_sides(nd=2)
+            * u_intf
+    )
+
+jump_mpsa = np.abs(jump_u[1::2]) / setup.params["crack_length"]
+
+# u_bem = setup.bem.compute_displacement(sd_rock.cell_centers)
+# pp.plot_grid(sd_rock, u_bem[::2], plot_2d=True, title="u_bem_x", linewidth=0)
+# pp.plot_grid(sd_rock, u_bem[1::2], plot_2d=True, title="u_bem_y", linewidth=0)
+
+# u_mpsa = data_rock[pp.STATE][setup.displacement_variable]
+# pp.plot_grid(sd_rock, u_mpsa[::2], plot_2d=True, title="u_mpsa_x", linewidth=0)
+# pp.plot_grid(sd_rock, u_mpsa[1::2], plot_2d=True, title="u_mpsa_y", linewidth=0)
+
+
+# %%
 bc_vals = setup.get_boundary_conditions()
 sides = setup._domain_boundary_sides(sd_rock)
 bc_faces = sides.all_bf
@@ -852,8 +952,212 @@ bc_michele = get_bc_values_michele(
     a = setup.params["crack_length"] / 2,
     n = setup.params["num_bem_segments"],
     domain_size = setup.params["domain_size"],
-    theta = math.radians(90-setup.params["crack_angle"])
+    theta = math.radians(90 - setup.params["crack_angle"])
 )
 
 bc_ms_x = bc_michele[0::2][bc_faces]
 bc_ms_y = bc_michele[1::2][bc_faces]
+
+#%% Plot boundary values
+plt.figure()
+plt.plot(bc_ms_x, "r", label="ms_x")
+plt.plot(bc_jv_x, "b.", label="jv_x")
+plt.plot(bc_ms_y, "g", label="ms_y")
+plt.plot(bc_jv_y, "m.", label="jv_y")
+plt.show()
+
+# %%
+# a = setup.params["crack_length"] / 2
+# length, height = setup.params["domain_size"]
+# theta = 0
+# theta = math.radians(90-theta)
+#
+# y_0 = height / 2 - a * np.cos(theta)
+# x_0 = length / 2 - a * np.sin(theta)
+# y_1 = height / 2 + a * np.cos(theta)
+# x_1 = length / 2 + a * np.sin(theta)
+#
+# frac_pts = np.array([[x_0, y_0], [x_1, y_1]]).T
+# frac_edges = np.array([[0,1]]).T
+
+# %% Plot sparsity of the linear system
+# plt.spy(setup.linear_system[0], markersize=1)
+# plt.show()
+
+#%% Extract blocks from the systems of equations
+
+# for i in range(1):
+#
+#     # Retrieve linear system
+#     # setup.prepare_simulation()
+#     setup.assemble_linear_system()
+#     A_full, b_full = setup.linear_system
+#
+#     # Extract degrees of freedom from the full system
+#     dof_rock = setup.dof_manager.grid_and_variable_to_dofs(sd_rock, "u")
+#     dof_frac = setup.dof_manager.grid_and_variable_to_dofs(sd_frac, "contact_traction")
+#     dof_intf = setup.dof_manager.grid_and_variable_to_dofs(intf, "mortar_u")
+#
+#     # Obtain new indices for reduced systems
+#     reduce_ind = np.hstack([dof_rock, dof_intf])
+#     rock_ind_reduced = np.arange(dof_rock.size)
+#     mortar_ind_reduced = np.arange(dof_rock.size, reduce_ind.size)
+#
+#     # Create vector of known traction
+#     normal_force_frac = setup.params["crack_pressure"] * sd_frac.cell_volumes
+#     shear_force_frac = np.zeros(sd_frac.num_cells)
+#     force_frac = np.array([shear_force_frac, normal_force_frac]).ravel("F")
+#
+#     # Create reduced linear system
+#     A_rm = A_full[reduce_ind][:, reduce_ind]  # A_{rock, mortar}
+#     b_rm = b_full[reduce_ind]
+#
+#     # Retrieve blocks from fracture contribution
+#     A_rm_f = A_full[reduce_ind][:, dof_frac]  # A_{rock, mortar; fracture}
+#     b_corrected = b_rm - A_rm_f * force_frac
+#
+#     # Displacement in the rock and on the interface
+#     u_rm = spsla.spsolve(A_rm, b_corrected)
+#
+#     # Distribute variables
+#     u_rock = u_rm[rock_ind_reduced]
+#     u_intf = u_rm[mortar_ind_reduced]
+#
+#     jump_u = (
+#             intf.mortar_to_secondary_avg(nd=2)
+#             * intf.sign_of_mortar_sides(nd=2)
+#             * u_intf
+#     )
+#
+#     jump_mpsa = np.abs(jump_u[1::2]) / setup.params["crack_length"]
+#
+# #jump_u = np.reshape(np.absolute(jump_u), (sd_frac.num_cells, 2))
+# #jump_u = jump_u[:, 0] * np.cos(beta) + jump_u[:, 1] * np.sin(beta)
+#
+# # pp.plot_grid(sd_rock, u_rock[::2], plot_2d=True, title="u_x")
+# # pp.plot_grid(sd_rock, u_rock[1::2], plot_2d=True, title="u_y")
+#
+# %%
+"""Plot relative displacement as a function of distance from crack center"""
+
+# Generate exact points
+# TODO: Do we need to rotate the coordinates?
+sd_frac = setup.mdg.subdomains()[1]
+crack_length = setup.params["crack_length"]
+x_min = np.min(sd_frac.nodes[0])
+x_max = np.max(sd_frac.nodes[0])
+y_min = np.min(sd_frac.nodes[1])
+y_max = np.max(sd_frac.nodes[1])
+x_ex = np.linspace(x_min, x_max, 100)
+y_ex = np.linspace(y_min, y_max, 100)
+z_ex = np.zeros(100)
+points_ex = np.array([x_ex, y_ex, z_ex])
+eta_ex = setup.distance_from_crack_center(points_ex)
+u_jump_ex = setup.exact_normal_displacement_jump(eta_ex)
+
+fig, ax = plt.subplots(figsize=(9, 8))
+
+# Plot exact solution
+ax.plot(
+    x_ex / crack_length,
+    u_jump_ex / crack_length,
+    linewidth=3,
+    color="blue",
+    alpha=0.6,
+)
+
+# Plot BEM solution
+bem_elements = 20
+bem_centers = setup.bem.get_bem_centers(bem_elements)
+bem_sol = setup.bem.bem_relative_normal_displacement(bem_elements)
+ax.plot(
+    bem_centers[0] / crack_length,
+    bem_sol / crack_length,
+    marker="o",
+    markersize=6,
+    linewidth=0,
+    color="orange",
+)
+
+# Plot MPSA solution
+ax.plot(
+    sd_frac.cell_centers[0] / crack_length,
+    jump_mpsa,
+    marker="s",
+    markersize=6,
+    linewidth=0,
+    color="red",
+)
+
+# plt.step(
+#     bem_centers[0] / crack_length,
+#     bem_sol / crack_length,
+#     where="mid",
+#     color="orange",
+# )
+# plt.step(
+#     np.array([2.0, bem_centers[0][0] / crack_length]),
+#     np.array([0, bem_sol[0] / crack_length]),
+#     where="pre",
+#     color="orange",
+# )
+# plt.step(
+#     np.array([bem_centers[0][-1] / crack_length, 3.0]),
+#     np.array([bem_sol[-1] / crack_length, 0]),
+#     where="post",
+#     color="orange",
+#     alpha=0.7,
+# )
+
+# Label plot
+plt.plot(
+    [],
+    [],
+    linewidth=4,
+    color="blue",
+    alpha=0.6,
+    label="Exact solution",
+)
+
+plt.plot(
+    [],
+    [],
+    linewidth=4,
+    color="red",
+    marker="s",
+    markersize=8,
+    label=f"MPSA ({sd_frac.num_cells} fracture cells)",
+)
+
+plt.plot(
+    [],
+    [],
+    linewidth=4,
+    color="orange",
+    marker="o",
+    markersize=8,
+    label=f"BEM ({bem_sol.size} fracture elements)",
+)
+
+
+
+# Set labels and legends
+ax.set_xlabel(r"Non-dimensional horizontal distance, " r"$x~/~b$", fontsize=13)
+ax.set_ylabel(
+    r"Relative normal displacement, " r"$\hat{u}_n(x)~/~b$", fontsize=13
+)
+ax.legend(fontsize=13)
+
+if not os.path.exists("out"):
+    os.makedirs("out")
+plt.savefig("out/" + "sneddon" + ".pdf", bbox_inches="tight")
+plt.gcf().clear()
+
+#%%
+u_rock_x = u_rock[::2]
+u_rock_y = u_rock[1::2]
+pp.plot_grid(sd_rock, u_rock_x, plot_2d=True, linewidth=0, title="u_x (MPSA)")
+pp.plot_grid(sd_rock, u_rock_y, plot_2d=True, linewidth=0, title="u_y (MPSA)")
+
+
+#%%
