@@ -393,10 +393,8 @@ class BEM:
         a = dl/2  # half-length of the bem segment
         coo = points_in_local_coo
 
-        # Constant term that multiplies the expressions
+        # Constant term multiplying the different expressions
         c0 = 1 / (4 * np.pi * (1 - nu))
-
-        # Derivatives of f(xbar, ybar)
 
         # F2(xbar, ybar) = f_{xbar}
         F2_bar = c0 * (
@@ -405,8 +403,8 @@ class BEM:
         )
 
         # F3(x_bar, y_bar) = f_{y_bar}
-        # Note that we have to use arctan2 and not arctan for computing F3(x_bar, y_bar)
-        # Not entirely why, but if arctan is employed, you'll get wrong results
+        # Note that we have to use arctan2 and not arctan for computing here.
+        # Not entirely why, but if arctan is employed, we get wrong results.
         F3_bar = -c0 * (
             np.arctan2(coo[1],  (coo[0] - a))
             - np.arctan2(coo[1], (coo[0] + a))
@@ -424,14 +422,13 @@ class BEM:
                 - (coo[0] + a) / ((coo[0] + a) ** 2 + coo[1] ** 2)
         )
 
-        # Displacement in the global x-coordinate
+        # Compute components of the displacement vector
         u_x = D_n * (
                 -(1 - 2 * nu) * np.cos(beta) * F2_bar
                 - 2 * (1 - nu) * np.sin(beta) * F3_bar
                 - coo[1] * (np.cos(beta) * F4_bar + np.sin(beta) * F5_bar)
         )
 
-        # Displacement in the global y-coordinate
         u_y = D_n * (
                 -(1 - 2 * nu) * np.sin(beta) * F2_bar
                 + 2 * (1 - nu) * np.cos(beta) * F3_bar
@@ -442,10 +439,73 @@ class BEM:
 
         return u
 
+    def bem_contribution_to_stress(
+        self,
+        normal_relative_displacement: float,
+        points_in_local_coo: np.ndarray,
+        num_bem_segments: Optional[int]=None,
+    ) -> list[list[np.ndarray]]:
+        """Compute BEM segment contribution to symmetric stress outside the crack"""
+
+        if num_bem_segments is None:
+            n = self.params["num_bem_segments"]
+        else:
+            n = num_bem_segments
+
+        D_n = normal_relative_displacement  # [m]
+        beta = self.params["crack_angle"]  # [radians]
+        mu = self.params["mu_lame"]  # [Pa]
+        nu = self.params["poisson_coefficient"]  # [-]
+        dl = self.get_bem_length(num_bem_segments=n)  # [m]
+        a = dl/2  # half-length of the bem segment
+        coo = points_in_local_coo
+
+        # Constant term multiplying the different expressions
+        c0 = 1 / (4 * np.pi * (1 - nu))
+
+        # F5(x_bar, y_bar) = f_{x_bar, x_bar} = - f_{y_bar, y_bar}
+        F5_bar = c0 * (
+                (coo[0] - a) / ((coo[0] - a) ** 2 + coo[1] ** 2)
+                - (coo[0] + a) / ((coo[0] + a) ** 2 + coo[1] ** 2)
+        )
+
+        # F6{xbar, ybar} = f_{x_bar, y_bar, y_bar}
+        F6_bar = c0 * (
+            ((coo[0] - a)**2 - coo[1]**2) / ((coo[0] - a)**2 + coo[1]**2)**2
+            - ((coo[0] + a)**2 - coo[1]**2) / ((coo[0] + a)**2 + coo[1]**2)**2
+        )
+
+        # F7{xbar, ybar} = f_{y_bar, y_bar, y_bar}
+        F7_bar = 2 * c0 * coo[1] * (
+            (coo[0] - a) / ((coo[0] - a)**2 + coo[1]**2)**2
+            - (coo[0] + a) / ((coo[0] + a)**2 + coo[1]**2)**2
+        )
+
+        # Compute components of the stress tensor
+        sigma_xx = 2 * mu * D_n * (
+            - F5_bar
+            + coo[1] * (np.sin(2 * beta * F6_bar) + np.cos(2 * beta * F7_bar))
+        )
+
+        sigma_yy = 2 * mu * D_n * (
+            - F5_bar
+            + coo[1] * (np.sin(2 * beta * F6_bar) + np.cos(2 * beta * F7_bar))
+        )
+
+        sigma_xy = 2 * mu * D_n * (
+            -coo[1] * (np.cos(2 * beta * F6_bar) - np.sin(2 * beta * F7_bar))
+        )
+
+        sigma_yx = sigma_xy
+
+        sigma = [[sigma_xx, sigma_xy], [sigma_yx, sigma_yy]]
+
+        return sigma
+
     def compute_displacement(
         self,
         points_in_global_coo: np.ndarray,
-        num_bem_segments: int | None = None,
+        num_bem_segments: Optional[int]=None,
     ) -> np.ndarray:
         """Compute displacements (outside of crack) at the given points using BEM.
 
@@ -497,6 +557,52 @@ class BEM:
             u += u_bem
 
         return u
+
+    def compute_stress(
+        self,
+        points_in_global_coo: np.ndarray,
+        num_bem_segments: Optional[int]=None,
+    ):
+        # Get number of bem segments used to discretize the crack
+        if num_bem_segments is None:
+            n = self.params["num_bem_segments"]
+        else:
+            n = num_bem_segments
+
+        # Get bem centers in global coordinates
+        bem_centers = self.get_bem_centers(n)
+
+        # Compute distance from bem centers to the crack center
+        eta = self.get_distance_from_crack_center(bem_centers)
+
+        # Get exact relative normal displacement for each bem segment
+        u_n = self.exact_relative_normal_displacement(eta)
+
+        # BEM loop
+        num_p = points_in_global_coo.shape[1]
+        zeros = np.zeros(num_p)
+        sigma = [[zeros, zeros], [zeros, zeros]]
+        for bem in range(n):
+            # Transform coordinates relative to each bem center
+            points_in_local_coo = self.transform_coordinates(
+                bem_center=bem_centers[:, bem],
+                points_in_global_coo=points_in_global_coo
+            )
+
+            # Get bem contribution to the displacement at the given set of points
+            sigma_bem = self.bem_contribution_to_stress(
+                normal_relative_displacement=u_n[bem],
+                points_in_local_coo=points_in_local_coo,
+                num_bem_segments=n
+            )
+
+            # Add contribution
+            sigma[0][0] += sigma_bem[0][0]
+            sigma[0][1] += sigma_bem[0][1]
+            sigma[1][0] += sigma_bem[1][0]
+            sigma[1][1] += sigma_bem[1][1]
+
+        return sigma
 
     def exact_relative_normal_displacement(self, eta: np.ndarray) -> np.ndarray:
         """Compute exact relative normal displacement [1].
@@ -886,7 +992,7 @@ params = {
     "plot_results": False,
     "num_bem_segments": 1000,
     "domain_size": (50, 50),
-    "mesh_size": 5.0,
+    "mesh_size": 0.5,
 }
 setup = SneddonSetup(params=params)
 setup.prepare_simulation()
@@ -1160,4 +1266,14 @@ pp.plot_grid(sd_rock, u_rock_x, plot_2d=True, linewidth=0, title="u_x (MPSA)")
 pp.plot_grid(sd_rock, u_rock_y, plot_2d=True, linewidth=0, title="u_y (MPSA)")
 
 
-#%%
+#%% Plot BEM stress solution
+cc = sd_rock.cell_centers
+sigma = setup.bem.compute_stress(
+    points_in_global_coo=cc,
+    num_bem_segments=1000
+)
+
+pp.plot_grid(sd_rock, sigma[0][0], plot_2d=True, title="sigma_xx", linewidth=0)
+pp.plot_grid(sd_rock, sigma[1][1], plot_2d=True, title="sigma_yy", linewidth=0)
+pp.plot_grid(sd_rock, sigma[0][1], plot_2d=True, title="sigma_xy", linewidth=0)
+
