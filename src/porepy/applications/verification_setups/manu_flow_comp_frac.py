@@ -9,11 +9,11 @@ case [1].
 In particular, we have added a pressure-dependent density which obeys the following
 consitutive relationship:
 
-.. math:
+.. math::
 
-    \rho(p) = \rho_0 \exp{c_f (p - p_0)},
+    \\rho(p) = \\rho_0 \\exp \\left[c_f (p - p_0) \\right],
 
-where :math:`\rho` and :math:`p` are the density and pressure, :math:`\rho_0` and
+where :math:`\\rho` and :math:`p` are the density and pressure, :math:`\\rho_0` and
 :math:`p_0` are the density and pressure at reference states, and :math:`c_f` is the
 fluid compressibility.
 
