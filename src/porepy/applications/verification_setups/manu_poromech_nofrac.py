@@ -5,21 +5,21 @@ system (without fractures) using two-dimensional manufactured solutions.
 The implementation considers a compressible fluid, resulting in a coupled non-linear
 set of equations. The dependecy of the fluid density with the pressure is given by [1]:
 
-.. math:
+.. math::
 
-    \\rho(p) =  \\rho_0 \\exp{c_f \\left(p - p_0\\right)},
+    \\rho(p) =  \\rho_0 \\exp \\left[c_f \\left(p - p_0\\right)\\right],
 
-where :math:`\\rho` and :math:`p` are the density and pressure, :math:`\\rho_0`` and
-:math:``p_0`` are the _reference_ density and pressure, and :math:`c_f` is the
+where :math:`\\rho` and :math:`p` are the density and pressure, :math:`\\rho_0` and
+:math:`p_0` are the _reference_ density and pressure, and :math:`c_f` is the
 _constant_ fluid compressibility.
 
 We provide three different manufactured solutions, namely `parabolic`,
-`nordbotten2016` [2], and `varela2021` [2], which can be specified as a model
+`nordbotten2016` [2], and `varela2021` [3], which can be specified as a model
 parameter.
 
 Parabolic manufactured solution:
 
-.. math:
+.. math::
 
     p(x, y, t) = t x (1 - x) y (1- y),
 
@@ -29,23 +29,23 @@ Parabolic manufactured solution:
 
 Manufactured solution based on [2]:
 
-.. math:
+.. math::
 
-    p(x, y, t) = t x (1 - x) \\sin{2 \\pi y},
+    p(x, y, t) = t x (1 - x) \\sin (2 \\pi y),
 
     u_x(x, y, t) = p(x, y, t),
 
-    u_y(x, y, t) = t * \\sin{2 \\pi x} \\sin{2 \\pi y}.
+    u_y(x, y, t) = t \\sin (2 \\pi x) \\sin (2 \\pi y).
 
 Manufactured solutions based on [3]:
 
-.. math:
+.. math::
 
-    p(x, y, t) = t x (1 - x) y (1 - y) \\sin{\\pi x} \\sin{\\pi y},
+    p(x, y, t) = t x (1 - x) y (1 - y) \\sin (\\pi x) \\sin (\\pi y),
 
-    u(x, y, t) = t x (1 - x) y (1 - y) \\sin{\\pi x},
+    u_x(x, y, t) = t x (1 - x) y (1 - y) \\sin (\\pi x),
 
-    u(x, y, t) = t x (1 - x) y (1 - y) \\cos{\\pi x}.
+    u_y(x, y, t) = t x (1 - x) y (1 - y) \\cos (\\pi x).
 
 References:
 
