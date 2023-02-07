@@ -5,7 +5,7 @@ This module contains light-weighted functional tests for Terzaghi's consolidatio
 import numpy as np
 
 import porepy as pp
-from porepy.models.applications.terzaghi_model import Terzaghi
+from porepy.models.applications.terzaghi.terzaghi_model import Terzaghi
 
 
 def test_pressure_and_consolidation_degree():
