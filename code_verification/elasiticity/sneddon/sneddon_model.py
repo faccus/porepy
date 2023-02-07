@@ -992,7 +992,7 @@ params = {
     "plot_results": False,
     "num_bem_segments": 1000,
     "domain_size": (50, 50),
-    "mesh_size": 0.5,
+    "mesh_size": 2.0,
 }
 setup = SneddonSetup(params=params)
 setup.prepare_simulation()
@@ -1262,18 +1262,32 @@ plt.gcf().clear()
 #%%
 u_rock_x = u_rock[::2]
 u_rock_y = u_rock[1::2]
-pp.plot_grid(sd_rock, u_rock_x, plot_2d=True, linewidth=0, title="u_x (MPSA)")
-pp.plot_grid(sd_rock, u_rock_y, plot_2d=True, linewidth=0, title="u_y (MPSA)")
+# pp.plot_grid(sd_rock, u_rock_x, plot_2d=True, linewidth=0, title="u_x (MPSA)")
+# pp.plot_grid(sd_rock, u_rock_y, plot_2d=True, linewidth=0, title="u_y (MPSA)")
+#
+#
+# #%% Plot BEM stress solution
+# cc = sd_rock.cell_centers
+# sigma = setup.bem.compute_stress(
+#     points_in_global_coo=cc,
+#     num_bem_segments=1000
+# )
+#
+# pp.plot_grid(sd_rock, sigma[0][0], plot_2d=True, title="sigma_xx", linewidth=0)
+# pp.plot_grid(sd_rock, sigma[1][1], plot_2d=True, title="sigma_yy", linewidth=0)
+# pp.plot_grid(sd_rock, sigma[0][1], plot_2d=True, title="sigma_xy", linewidth=0)
 
+#%% Convergence analysis
 
-#%% Plot BEM stress solution
+# Elastic force
+
+# Displacement
 cc = sd_rock.cell_centers
-sigma = setup.bem.compute_stress(
-    points_in_global_coo=cc,
-    num_bem_segments=1000
-)
+u_bem = setup.bem.compute_displacement(cc)
+pp.plot_grid(sd_rock, u_rock[::2], plot_2d=True, linewidth=0, title="u_x (MPSA)")
+pp.plot_grid(sd_rock, u_rock[1::2], plot_2d=True, linewidth=0, title="u_y (MPSA)")
+pp.plot_grid(sd_rock, u_bem[::2], plot_2d=True, linewidth=0, title="u_x (BEM)")
+pp.plot_grid(sd_rock, u_bem[1::2], plot_2d=True, linewidth=0, title="u_y (BEM)")
 
-pp.plot_grid(sd_rock, sigma[0][0], plot_2d=True, title="sigma_xx", linewidth=0)
-pp.plot_grid(sd_rock, sigma[1][1], plot_2d=True, title="sigma_yy", linewidth=0)
-pp.plot_grid(sd_rock, sigma[0][1], plot_2d=True, title="sigma_xy", linewidth=0)
+# Relative normal displacement
 
