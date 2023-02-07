@@ -21,6 +21,54 @@ import math
 from typing import Optional, Union
 from dataclasses import dataclass
 
+
+def relative_l2_error(
+        grid: pp.Grid,
+        true_array: np.ndarray,
+        approx_array: np.ndarray,
+        is_scalar: bool,
+        is_cc: bool,
+) -> float:
+    """Compute discrete relative L2-error.
+    Parameters:
+        grid: Either a subdomain grid or a mortar grid.
+        true_array: Array containing the true values of a given variable.
+        approx_array: Array containing the approximate values of a given variable.
+        is_scalar: Whether the variable is a scalar quantity. Use ``False`` for
+            vector quantities. For example, ``is_scalar=True`` for pressure, whereas
+            ``is_scalar=False`` for displacement.
+        is_cc: Whether the variable is associated to cell centers. Use ``False``
+            for variables associated to face centers. For example, ``is_cc=True``
+            for pressures, whereas ``is_scalar=False`` for subdomain fluxes.
+    Returns:
+        Discrete relative L2-error between the true and approximated arrays.
+    Raises:
+        ValueError if a mortar grid is given and ``is_cc=False``.
+    """
+    # Sanity check
+    if isinstance(grid, pp.MortarGrid) and not is_cc:
+        raise ValueError("Mortar variables can only be cell-centered.")
+
+    # Obtain proper measure
+    if is_cc:
+        if is_scalar:
+            meas = grid.cell_volumes
+        else:
+            meas = grid.cell_volumes.repeat(grid.dim)
+    else:
+        assert isinstance(grid, pp.Grid)
+        if is_scalar:
+            meas = grid.face_areas
+        else:
+            meas = grid.face_areas.repeat(grid.dim)
+
+    # Compute error
+    numerator = np.sqrt(np.sum(meas * np.abs(true_array - approx_array) ** 2))
+    denominator = np.sqrt(np.sum(meas * np.abs(true_array) ** 2))
+
+    return numerator / denominator
+
+
 def get_bc_values_michele(
         sd_rock: pp.Grid,
         G: float,
@@ -489,7 +537,7 @@ class BEM:
 
         sigma_yy = 2 * mu * D_n * (
             - F5_bar
-            + coo[1] * (np.sin(2 * beta * F6_bar) + np.cos(2 * beta * F7_bar))
+            + coo[1] * (np.sin(2 * beta * F6_bar) - np.cos(2 * beta * F7_bar))
         )
 
         sigma_xy = 2 * mu * D_n * (
@@ -992,7 +1040,7 @@ params = {
     "plot_results": False,
     "num_bem_segments": 1000,
     "domain_size": (50, 50),
-    "mesh_size": 2.0,
+    "mesh_size": 2,
 }
 setup = SneddonSetup(params=params)
 setup.prepare_simulation()
@@ -1065,12 +1113,12 @@ bc_ms_x = bc_michele[0::2][bc_faces]
 bc_ms_y = bc_michele[1::2][bc_faces]
 
 #%% Plot boundary values
-plt.figure()
-plt.plot(bc_ms_x, "r", label="ms_x")
-plt.plot(bc_jv_x, "b.", label="jv_x")
-plt.plot(bc_ms_y, "g", label="ms_y")
-plt.plot(bc_jv_y, "m.", label="jv_y")
-plt.show()
+# plt.figure()
+# plt.plot(bc_ms_x, "r", label="ms_x")
+# plt.plot(bc_jv_x, "b.", label="jv_x")
+# plt.plot(bc_ms_y, "g", label="ms_y")
+# plt.plot(bc_jv_y, "m.", label="jv_y")
+# plt.show()
 
 # %%
 # a = setup.params["crack_length"] / 2
@@ -1266,13 +1314,13 @@ u_rock_y = u_rock[1::2]
 # pp.plot_grid(sd_rock, u_rock_y, plot_2d=True, linewidth=0, title="u_y (MPSA)")
 #
 #
-# #%% Plot BEM stress solution
+#%% Plot BEM stress solution
 # cc = sd_rock.cell_centers
 # sigma = setup.bem.compute_stress(
 #     points_in_global_coo=cc,
 #     num_bem_segments=1000
 # )
-#
+
 # pp.plot_grid(sd_rock, sigma[0][0], plot_2d=True, title="sigma_xx", linewidth=0)
 # pp.plot_grid(sd_rock, sigma[1][1], plot_2d=True, title="sigma_yy", linewidth=0)
 # pp.plot_grid(sd_rock, sigma[0][1], plot_2d=True, title="sigma_xy", linewidth=0)
@@ -1284,10 +1332,71 @@ u_rock_y = u_rock[1::2]
 # Displacement
 cc = sd_rock.cell_centers
 u_bem = setup.bem.compute_displacement(cc)
-pp.plot_grid(sd_rock, u_rock[::2], plot_2d=True, linewidth=0, title="u_x (MPSA)")
-pp.plot_grid(sd_rock, u_rock[1::2], plot_2d=True, linewidth=0, title="u_y (MPSA)")
-pp.plot_grid(sd_rock, u_bem[::2], plot_2d=True, linewidth=0, title="u_x (BEM)")
-pp.plot_grid(sd_rock, u_bem[1::2], plot_2d=True, linewidth=0, title="u_y (BEM)")
+# pp.plot_grid(sd_rock, u_rock[::2], plot_2d=True, linewidth=0, title="u_x (MPSA)")
+# pp.plot_grid(sd_rock, u_rock[1::2], plot_2d=True, linewidth=0, title="u_y (MPSA)")
+# pp.plot_grid(sd_rock, u_bem[::2], plot_2d=True, linewidth=0, title="u_x (BEM)")
+# pp.plot_grid(sd_rock, u_bem[1::2], plot_2d=True, linewidth=0, title="u_y (BEM)")
 
 # Relative normal displacement
 
+
+
+#%%
+fc = sd_rock.face_centers
+nf = sd_rock.face_normals
+
+# BEM FORCE
+sigma_bem = setup.bem.compute_stress(points_in_global_coo=fc, num_bem_segments=1000)
+force_bem_x = sigma_bem[0][0] * nf[0] + sigma_bem[0][1] * nf[1]
+force_bem_y = sigma_bem[1][0] * nf[0] + sigma_bem[1][1] * nf[1]
+force_bem = np.concatenate((force_bem_x, force_bem_y)).ravel("F")
+
+# MPSA FORCE
+setup.reconstruct_stress()
+force_mpsa = data_rock[pp.STATE]["stress"].copy()
+
+error_force = relative_l2_error(
+    grid=sd_rock,
+    true_array=force_bem,
+    approx_array=force_mpsa,
+    is_scalar=False,
+    is_cc=False
+)
+
+error_displacement = relative_l2_error(
+    grid=sd_rock,
+    true_array=u_bem,
+    approx_array=u_rock,
+    is_scalar=False,
+    is_cc=True
+)
+
+print("Force error", error_force)
+print("Displacement error", error_displacement)
+
+#%%
+mesh_size = np.array([2, 1, 0.5, 0.25])
+errors = np.array([0.010883, 0.00449455, 0.001592, 0.0006610])
+
+plt.figure()
+
+rate = 1
+x1 = np.log2(1 / 2)
+x2 = np.log2(1 / 0.25)
+y1 = -6
+y2 = y1 - rate * (x2 - x1)
+plt.plot([x1, x2], [y1, y2], "k-", linewidth=3, label="First order")
+
+rate = 2
+x1 = np.log2(1 / 2)
+x2 = np.log2(1 / 0.25)
+y1 = -7
+y2 = y1 - rate * (x2 - x1)
+plt.plot([x1, x2], [y1, y2], "k--", linewidth=3, label="Second order")
+
+plt.plot(np.log2(1/mesh_size), np.log2(errors), "o-r", linewidth=3)
+plt.xlabel("log2( 1/h )")
+plt.ylabel("log2(error displacement)")
+plt.grid()
+plt.legend()
+plt.show()
