@@ -37,8 +37,10 @@ class Entry(NamedTuple):
     """Named tuple class to store attributes of glossary entries."""
 
     type: str
-    """Name of the class for the entry. For variables, the actual class. For 
-    functions and methods, a variant of ``Callable[[arg_type], return_type]``."""
+    """Name of the class for the entry. For variables, the actual class. For
+    functions and methods, a variant of ``Callable[[arg_type], return_type]``.
+
+    """
 
     docstring: str
     """Suggested docstring for the entry."""
@@ -690,7 +692,8 @@ class Glossary:
     def print_all_entries(self) -> None:
         """Prints all stored entries."""
         for field in fields(Glossary):
-            print_glossary_entry(field.default)
+            entry = field.default
+            print_glossary_entry(entry)  # type: ignore[arg-type]
 
     def num_entries(self) -> int:
         """Number of entries stored in the glossary.
