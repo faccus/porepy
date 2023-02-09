@@ -1,21 +1,22 @@
-"""Module containing classes and functions for printing model docstrings.
+"""Module for printing docstrings of variables and methods from model mixin classes.
 
-Mixins have introduced the need to declare types of methods and attributes that are
-supplied by other mixins at mixing time. Such types are normally declared as class
-attributes (at the top of the class) with their associated docstring below.
+Mixins have introduced the need to declare types of methods and attributes that will be
+supplied by other mixin classes. These types are normally declared at the very top of
+the class, with their associated docstring.
 
-Naturally, this introduces a great deal of non-uniformity in addition to the tedious
-process of writing the docstring every time. The purpose of this module is to provide a
-simple way of accessing (suggested) docstrings for commonly used methods and
-variables. These are stored in the :class:`Glossary` data class as :class:`Entry`s.
+This potentially introduces a great deal of non-uniformity, in addition to the tedious
+process of writing the docstrings. The purpose of this module is to provide a simple
+way of accessing _suggested_ docstrings for commonly used methods and variables
+defined in the model's framework.
 
+These are stored as entries (see :class:`Entry`) in the :class:`Glossary` data class.
+Each entry contains three string attributes: the name, the type, and the docstring.
 The intended usage is to print an entry via :func:`print_glossary_entry()` (e.g.,
 in an iPython session or similar) and copy-paste the suggested docstring into a file.
 
 Notes:
-    Depending on the usage, entries stored in :class:`Glossary` might NOT contain
-    accurate. It is therefore responsibility of the developer to ensure that the
-    docstrings are correct.
+    Depending on the usage, entries might NOT be completely accurate. It is therefore
+    responsibility of the user/developer to make sure that the docstrings are correct.
 
 Examples:
 
@@ -37,7 +38,7 @@ class Entry(NamedTuple):
     """Named tuple class to store attributes of glossary entries."""
 
     type: str
-    """Name of the class for the entry. For variables, the actual class. For
+    """Name of the class associated with the entry. For variables, the actual class. For
     functions and methods, a variant of ``Callable[[arg_type], return_type]``.
 
     """
@@ -51,7 +52,7 @@ class Entry(NamedTuple):
 
 @dataclass
 class Glossary:
-    """Data class to store entries as named tuples, ordered alphabetically.
+    """Data class to store entries as named tuples.
 
     Notes:
           Please insert new entries respecting the alphabetical order.
@@ -708,22 +709,21 @@ def print_glossary_entry(entry: Entry, wrap_at: int = 88, offset: int = 4) -> No
     """Print copy-and-paste-ready docstring of a glossary entry.
 
     Parameters:
-        entry: An instance of the :class:`~ModelGlossary` data class.
+        entry: An instance of the :class:`~Glossary` data class.
         wrap_at: Maximum number of admissible characters in one line. Default is 88.
         offset: Number of spaces accounted for indentation. Default is 4.
 
     """
-
     # Retrieve raw docstring
     raw: str = entry.docstring
 
     # Pad string with """ """
     padded: str = '"""' + raw + '"""'
 
-    # Wrap string if is too long
+    # Wrap string if it is too long
     wrapped: list[str] = wrap(padded, wrap_at - offset)
 
-    # Print header:
+    # Print header, e.g., entry name and its type
     print(f"\n{entry.name}: {entry.type}")
 
     # Print docstring
