@@ -79,8 +79,8 @@ class Glossary:
     balance_equation: Entry = Entry(
         type="Callable[[list[pp.Grid], pp.ad.Operator, pp.ad.Operator, pp.ad.Operator,"
         " int], pp.ad.Operator]",
-        docstring="Operator giving the displacement jump on fracture grids. Normally"
-        " defined in a mixin instance of :class:`~porepy.models.models.ModelGeometry`.",
+        docstring="Make a balance equation on subdomains. Normally defined in a mixin"
+        " instance of :class:`~porepy.models.abstract_equations.BalanceEquations`.",
         name="balance_equation",
     )
 
@@ -225,7 +225,8 @@ class Glossary:
     displacement_jump: Entry = Entry(
         type="Callable[[list[pp.Grid]], pp.ad.Operator]",
         docstring="Operator giving the displacement jump on fracture grids. Normally"
-        " defined in a mixin instance of :class:`~porepy.models.models.ModelGeometry`.",
+        " defined in a mixin instance of"
+        " :class:`~porepy.models.momentum_balance.VariablesMomentumBalance`.",
         name="displacement_jump",
     )
 
