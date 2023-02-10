@@ -51,6 +51,7 @@ import numpy as np
 import scipy.sparse.linalg as spsla
 
 import porepy as pp
+from porepy.applications.docstring_glossary import Glossary
 from porepy.applications.verification_setups.verification_utils import (
     VerificationDataSaving,
     VerificationUtils,
@@ -140,12 +141,8 @@ class SneddonExactSolution:
             Array of ``shape=(3, )`` with the global coordinates of the crack center.
 
         """
-        # TODO: Retrieve `a` and `b` from domain instead
-        ls = 1 / self.setup.units.m  # length scaling
-        a, b = self.setup.params.get("domain_size", (50, 50))  # scaled [m]
-        a *= ls
-        b *= ls
-        return np.array([a/2, b/2, 0.0])
+        a, b = self.setup.domain_size()  # scaled [m]
+        return np.array([a / 2, b / 2, 0.0])
 
     def get_bem_length(self) -> number:
         """Length of BEM segments in scaled [m] for a uniformly partitioned crack.
@@ -276,7 +273,7 @@ class SneddonExactSolution:
         theta = self.setup.params.get("crack_angle", 0)  # [radians]
         nu = self.setup.poisson_coefficient()  # [-]
         bem_length = self.get_bem_length()  # scaled [m]
-        hl = bem_length/2  # half-length of the bem segment in scaled [m]
+        hl = bem_length / 2  # half-length of the bem segment in scaled [m]
         coo = points_in_local_coo  # scaled [m]
 
         # Common term multiplying the different expressions
@@ -292,36 +289,117 @@ class SneddonExactSolution:
         # Note that we have to use arctan2 and not arctan. Not entirely sure  why,
         # but if arctan is employed, we get wrong results.
         F3_bar = -c0 * (
-            np.arctan2(coo[1],  (coo[0] - hl))
-            - np.arctan2(coo[1], (coo[0] + hl))
+            np.arctan2(coo[1], (coo[0] - hl)) - np.arctan2(coo[1], (coo[0] + hl))
         )
 
         # F4(x_bar, y_bar) = f_{x_bar, y_bar}
         F4_bar = c0 * (
-                coo[1] / ((coo[0] - hl) ** 2 + coo[1] ** 2)
-                - coo[1] / ((coo[0] + hl) ** 2 + coo[1] ** 2)
+            coo[1] / ((coo[0] - hl) ** 2 + coo[1] ** 2)
+            - coo[1] / ((coo[0] + hl) ** 2 + coo[1] ** 2)
         )
 
         # F5(x_bar, y_bar) = f_{x_bar, x_bar} = - f_{y_bar, y_bar}
         F5_bar = c0 * (
-                (coo[0] - hl) / ((coo[0] - hl) ** 2 + coo[1] ** 2)
-                - (coo[0] + hl) / ((coo[0] + hl) ** 2 + coo[1] ** 2)
+            (coo[0] - hl) / ((coo[0] - hl) ** 2 + coo[1] ** 2)
+            - (coo[0] + hl) / ((coo[0] + hl) ** 2 + coo[1] ** 2)
         )
 
         # Compute components of the displacement vector
         u_x = D_n * (
-                -(1 - 2 * nu) * np.cos(theta) * F2_bar
-                - 2 * (1 - nu) * np.sin(theta) * F3_bar
-                - coo[1] * (np.cos(theta) * F4_bar + np.sin(theta) * F5_bar)
+            -(1 - 2 * nu) * np.cos(theta) * F2_bar
+            - 2 * (1 - nu) * np.sin(theta) * F3_bar
+            - coo[1] * (np.cos(theta) * F4_bar + np.sin(theta) * F5_bar)
         )
 
         u_y = D_n * (
-                -(1 - 2 * nu) * np.sin(theta) * F2_bar
-                + 2 * (1 - nu) * np.cos(theta) * F3_bar
-                - coo[1] * (np.sin(theta) * F4_bar - np.cos(theta) * F5_bar)
+            -(1 - 2 * nu) * np.sin(theta) * F2_bar
+            + 2 * (1 - nu) * np.cos(theta) * F3_bar
+            - coo[1] * (np.sin(theta) * F4_bar - np.cos(theta) * F5_bar)
         )
 
         return np.ravel(np.array([u_x, u_y]), "F")
+
+
+# -----> Utilities
+class SneddonUtilities(VerificationUtils):
+    """Mixin class that provides useful utility methods for the verification setup."""
+
+    solid: pp.SolidConstants
+    """Solid constants object."""
+
+    # -----> Derived physical constants
+    def poisson_coefficient(self) -> number:
+        """Obtain poisson coefficient from Lamé parameters."""
+        lmbda = self.solid.lame_lambda()  # scaled [Pa]
+        mu = self.solid.shear_modulus()  # scaled [Pa]
+        return lmbda / (2 * (lmbda + mu))
+
+    # -----> Plotting methods
+    def plot_results(self):
+        """Plot results."""
+        ...
+
+
+# -----> Boundary conditions
+class SneddonBoundaryConditions(pp.momentum_balance.BoundaryConditionsMomentumBalance):
+    """Mixin class that sets the boundary conditions for Sneddon's setup."""
+
+    params: dict
+    """Setup dictionary parameter.
+     
+     Accessed parameters: `crack_pressure``.
+     
+     """
+
+    mdg: pp.MixedDimensionalGrid
+
+    solid: pp.SolidConstants
+    """Solid constants object."""
+
+    units: pp.Units
+    """Units object, containing the scaling the base magnitudes."""
+
+    def crack_pressure(self) -> pp.number:
+        """Set the crack pressure in scaled [Pa]."""
+        p0 = self.params.get("crack_pressure", 1e5)  # [Pa]
+        return self.solid.convert_units(p0, "Pa")
+
+    def bc_values_mechanics(self, subdomains: list[pp.Grid]) -> pp.ad.Array:
+        """Boundary values for the momentum balance.
+
+        Parameters:
+            subdomains: List of subdomains.
+
+        Returns:
+            bc_values: Array of boundary condition values, containing the exact
+            displacement obtained with the BEM procedure.
+
+        """
+        sd = self.mdg.subdomains()[0]
+
+
+# -----> Solution strategy
+class SneddonSolutionStrategy(pp.SolutionStrategy):
+    """Class containing the solution strategy to solve Sneddon's problem."""
+
+    mdg: pp.MixedDimensionalGrid
+    """Mixed-dimensional grid."""
+
+    def __init__(self, params):
+        """Class constructor."""
+
+        super().__init__(params=params)
+
+    def initial_condition(self) -> None:
+        """Set initial conditions for the problem.
+
+        Even though this is not a time-dependent problem, we need to prescribe the
+        values of the initial traction in the crack.
+
+        """
+        super().initial_condition()  # this sets zero displacement in the matrix
+
+        sd = self.mdg.subdomains()
 
 
 # -----> Geometry
@@ -401,9 +479,8 @@ class SneddonGeometry(pp.ModelGeometry):
             self.domain_bounds = domain
 
 
-class SneddonSetup(  # type: ignore[misc]
-    pp.momentum_balance.MomentumBalance
-):
+# -----> Mixer
+class SneddonSetup(pp.momentum_balance.MomentumBalance):  # type: ignore[misc]
     """Mixer class for Sneddon's problem of crack pressurization.
 
     Model parameters of special relevance for this class:
