@@ -360,6 +360,7 @@ def dfm_from_gmsh(file_name: str, dim: int, **kwargs) -> pp.MixedDimensionalGrid
 
     if dim == 2:
         subdomains = pp.fracs.simplex.triangle_grid_from_gmsh(out_file, **kwargs)
+        print()
     elif dim == 3:
         subdomains = pp.fracs.simplex.tetrahedral_grid_from_gmsh(
             file_name=out_file, **kwargs

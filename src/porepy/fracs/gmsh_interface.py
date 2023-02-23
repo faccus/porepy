@@ -265,6 +265,9 @@ class GmshWriter:
             # and embeds them in the domain.
             self._add_fractures_2d()
 
+            # Next, add circles of radii `r` around fracture tips
+            self._add_circular_constrains_around_tips()
+
         else:
             # In 3d, we can first add lines to the description, they are only used
             # to define surfaces later.
@@ -525,6 +528,23 @@ class GmshWriter:
             gmsh.model.mesh.embed(line_dim, line_tags, self._dim, self._domain_tag)
 
         return line_tags
+
+    def _add_circular_constrains_around_tips(self):
+        """Add a circular region around fully embedded fracture tip."""
+        gmsh.model.geo.addPoint(15, 25-5, 0, 2, tag=100)
+        gmsh.model.geo.addPoint(15, 25+5, 0, 2, tag=101)
+        gmsh.model.geo.synchronize()
+
+        gmsh.model.geo.addCircleArc(100, 1, 101, tag=1024)
+        gmsh.model.geo.synchronize()
+        # gmsh.model.geo.add_circle_arc(101, 1, 100, tag=1025)
+        # gmsh.model.geo.synchronize()
+        #
+        gmsh.model.mesh.embed(1, [1024], 2, 1)
+        phys_group = gmsh.model.addPhysicalGroup(1, [1024])
+        gmsh.model.setPhysicalName(1, phys_group, "AUXILIARY_LINE_0")
+        # gmsh.model.geo.synchronize()
+
 
     def _add_domain_2d(self) -> int:
         """Write boundary lines, and tie them together to a closed loop. Define domain."""
