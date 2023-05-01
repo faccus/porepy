@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import porepy as pp
+import numpy as np
 
 from . import domains, fracture_sets
+from typing import Union
 
 
 class SquareDomainOrthogonalFractures:
@@ -73,3 +75,26 @@ class CubeDomainOrthogonalFractures:
     def set_domain(self) -> None:
         """Set the cube domain."""
         self._domain = domains.nd_cube_domain(3, self.domain_size)
+
+
+class BenchmarkFlow2dGeigerGeometry:
+    """Mixin class containing the geometry for the benchmark 4.1 from [1].
+
+    To be used as a mixin taking precedence over
+    :class:`~porepy.models.geometry.ModelGeometry`.
+
+    References:
+
+        -[1] Flemisch, Bernd, et al. "Benchmarks for single-phase flow in fractured
+        porous media." Advances in Water Resources 111 (2018): 239-258.
+
+    """
+    def set_fractures(self) -> None:
+        """The fracture set consists of six orthogonal fractures."""
+        f1 = pp.LineFracture(np.array([[0.000, 1.000], [0.500, 0.500]]))
+        f2 = pp.LineFracture(np.array([[0.500, 0.500], [0.000, 1.000]]))
+        f3 = pp.LineFracture(np.array([[0.500, 1.000], [0.750, 0.750]]))
+        f4 = pp.LineFracture(np.array([[0.750, 0.750], [0.500, 1.000]]))
+        f5 = pp.LineFracture(np.array([[0.500, 0.750], [0.625, 0.625]]))
+        f6 = pp.LineFracture(np.array([[0.625, 0.625], [0.500, 0.750]]))
+        self._fractures: list[pp.LineFracture] = [f1, f2, f3, f4, f5, f6]
