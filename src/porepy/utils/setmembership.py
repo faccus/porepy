@@ -17,25 +17,7 @@ def unique_rows(
     np.ndarray[Any, np.dtype[np.int64]],
     np.ndarray[Any, np.dtype[np.int64]],
 ]:
-    """
-    Function similar to Matlab's unique(...,'rows')
-
-    See also function unique_columns in this module; this is likely slower, but
-    is understandable, documented, and has a tolerance option.
-
-    Copied from
-    http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array/
-    (summary pretty far down on the page)
-    Note: I have no idea what happens here
-
-    """
-    b = np.ascontiguousarray(data).view(
-        np.dtype((np.void, data.dtype.itemsize * data.shape[1]))
-    )
-    _, ia = np.unique(b, return_index=True)
-    _, ic = np.unique(b, return_inverse=True)
-    #    return np.unique(b).view(data.dtype).reshape(-1, data.shape[1]), ia, ic
-    return data[ia], ia, ic
+    return np.unique(data, axis=0, return_index=True, return_inverse=True)
 
 
 def ismember_rows(
